@@ -1,0 +1,17 @@
+﻿# Compiled class files
+bin/
+*.class
+
+# Packaged runtimes and release bundles (upload to GitHub Releases instead)
+RetroMix/
+*.zip
+*.jar
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# OS files
+Thumbs.db
+.DS_Store
