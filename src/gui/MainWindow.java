@@ -54,6 +54,23 @@ public class MainWindow extends JFrame {
         super("Retro Mix");
         this.mixer = mixer;
 
+        try {
+            java.io.InputStream stream = getClass().getResourceAsStream("/assets/icon.png");
+            if (stream == null) {
+                // Fallback to local file path during IDE/dev execution
+                File fallback = new File("assets/icon.png");
+                if (fallback.exists()) {
+                    stream = new java.io.FileInputStream(fallback);
+                }
+            }
+            if (stream != null) {
+                Image icon = javax.imageio.ImageIO.read(stream);
+                setIconImage(icon);
+            }
+        } catch (Exception e) {
+            System.err.println("Could not load window icon: " + e.getMessage());
+        }
+
         initTypography();
 
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
