@@ -26,7 +26,7 @@ public class AudioMixerEngine implements Runnable {
     private int playlistIndex = -1;
     private File watchedFolder = null;
 
-    private boolean isTransitioning = false;
+    private volatile boolean isTransitioning = false;
     private float autoFader = 0.0f;
     private volatile float masterVolume = 0.85f;
 
@@ -116,15 +116,18 @@ public class AudioMixerEngine implements Runnable {
         asyncLoader.submit(() -> {
             try {
                 if (primaryActive) {
+                    streamSecondary.unload(); // Free inactive stream
                     streamPrimary.load(file);
                     streamPrimary.play();
                     autoFader = 0.0f;
                 } else {
+                    streamPrimary.unload();   // Free inactive stream
                     streamSecondary.load(file);
                     streamSecondary.play();
                     autoFader = 1.0f;
                 }
                 isTransitioning = false;
+                System.gc(); // Suggest immediate reclamation of dead PCM arrays
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -190,13 +193,14 @@ public class AudioMixerEngine implements Runnable {
             AudioTrackStream current = primaryActive ? streamPrimary : streamSecondary;
             AudioTrackStream upcoming = primaryActive ? streamSecondary : streamPrimary;
 
-            // Auto-crossfade
-            if (!isTransitioning && current.isNearEnd(FADE_FRAMES) && playlist.size() > 1 && current.getPlaybackRate() > 0) {
+            // Auto-crossfade trigger
+            if (!isTransitioning && current.isPlaying() && current.isNearEnd(FADE_FRAMES) && playlist.size() > 1 && current.getPlaybackRate() > 0) {
                 isTransitioning = true;
                 int nextIndex = (playlistIndex + 1) % playlist.size();
                 File nextFile = playlist.get(nextIndex);
                 asyncLoader.submit(() -> {
                     try {
+                        upcoming.unload(); // Clear previous data before loading
                         upcoming.load(nextFile);
                         upcoming.play();
                     } catch (Exception ignored) {}
@@ -210,18 +214,22 @@ public class AudioMixerEngine implements Runnable {
                     if (autoFader >= 1.0f) {
                         autoFader = 1.0f;
                         current.stop();
+                        current.unload(); // Release completed song from memory
                         primaryActive = false;
                         isTransitioning = false;
                         playlistIndex = (playlistIndex + 1) % playlist.size();
+                        System.gc();
                     }
                 } else {
                     autoFader -= step;
                     if (autoFader <= 0.0f) {
                         autoFader = 0.0f;
                         current.stop();
+                        current.unload(); // Release completed song from memory
                         primaryActive = true;
                         isTransitioning = false;
                         playlistIndex = (playlistIndex + 1) % playlist.size();
+                        System.gc();
                     }
                 }
             }

@@ -1,6 +1,6 @@
 # Retro Mix 💽
 
-A minimalist retro desktop music player and vinyl workstation built with pure Java OOP and Swing[cite: 1].
+A minimalist retro desktop music player and vinyl workstation built with pure Java OOP and Swing.
 
 ---
 

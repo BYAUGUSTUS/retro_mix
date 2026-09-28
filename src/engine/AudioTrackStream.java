@@ -138,6 +138,17 @@ public class AudioTrackStream implements PCMProcessor {
         scratchFilter.reset();
     }
 
+    public synchronized void unload() {
+        this.isPlaying = false;
+        this.currentFramePos = 0.0;
+        this.totalFrames = 0;
+        this.pcmLeft = new float[0];
+        this.pcmRight = new float[0];
+        this.albumArt = null;
+        this.trackName = "UNTITLED VINYL";
+        this.scratchFilter.reset();
+    }
+
     public void setPlaybackRate(float rate) { this.playbackRate = rate; }
     public float getPlaybackRate() { return playbackRate; }
     public void setGain(float gain) { this.channelGain = Math.max(0.0f, Math.min(1.0f, gain)); }
@@ -147,7 +158,7 @@ public class AudioTrackStream implements PCMProcessor {
     public BufferedImage getAlbumArt() { return albumArt; }
 
     public synchronized int readNextChunk(float[] leftChannel, float[] rightChannel, int framesToRead) {
-        if (!isPlaying || totalFrames == 0) return 0;
+        if (!isPlaying || totalFrames == 0 || pcmLeft == null || pcmLeft.length == 0) return 0;
 
         int framesGenerated = 0;
         for (int i = 0; i < framesToRead; i++) {
