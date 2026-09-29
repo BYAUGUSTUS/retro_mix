@@ -1,6 +1,8 @@
 # Retro Mix 💽
 
-A minimalist retro desktop music player and vinyl workstation built with pure Java OOP and Swing.
+**Retro Mix** is a dedicated offline, high-fidelity audio workstation and vintage turntable player engineered for purists who demand **studio-grade, bit-perfect local audio reproduction** without streaming compression, telemetry, or system bloat.
+
+Built from the ground up in pure Java using low-level Digital Signal Processing (DSP) and custom 2D hardware-accelerated vector graphics, Retro Mix merges the warmth of analog crate digging with precision modern audio mixing.
 
 ---
 
