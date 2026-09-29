@@ -5,8 +5,7 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.sound.sampled.*;
 
 public class AudioMixerEngine implements Runnable {
@@ -27,11 +26,12 @@ public class AudioMixerEngine implements Runnable {
     private File watchedFolder = null;
 
     private volatile boolean isTransitioning = false;
+    private volatile boolean crossfadeScheduled = false;
     private float autoFader = 0.0f;
     private volatile float masterVolume = 0.85f;
 
-    // Asynchronous loader executor
-    private final ExecutorService asyncLoader = Executors.newSingleThreadExecutor();
+    // Concurrency control to eliminate task queues and leaks
+    private final AtomicBoolean isLoading = new AtomicBoolean(false);
 
     private final float[] pLeft = new float[BUFFER_FRAMES];
     private final float[] pRight = new float[BUFFER_FRAMES];
@@ -61,10 +61,10 @@ public class AudioMixerEngine implements Runnable {
 
     public void setWatchedFolder(File folder, Runnable onComplete) {
         this.watchedFolder = folder;
-        asyncLoader.submit(() -> {
+        new Thread(() -> {
             refreshPlaylistFromFolder();
             if (onComplete != null) onComplete.run();
-        });
+        }, "RetroMix-FolderWatcher").start();
     }
 
     public void refreshPlaylistFromFolder() {
@@ -113,25 +113,31 @@ public class AudioMixerEngine implements Runnable {
     }
 
     private void loadTrackIntoActiveStream(File file) {
-        asyncLoader.submit(() -> {
+        new Thread(() -> {
+            if (!isLoading.compareAndSet(false, true)) {
+                return; // Drop concurrent duplicate load attempts
+            }
             try {
                 if (primaryActive) {
-                    streamSecondary.unload(); // Free inactive stream
+                    streamSecondary.unload();
                     streamPrimary.load(file);
                     streamPrimary.play();
                     autoFader = 0.0f;
                 } else {
-                    streamPrimary.unload();   // Free inactive stream
+                    streamPrimary.unload();
                     streamSecondary.load(file);
                     streamSecondary.play();
                     autoFader = 1.0f;
                 }
                 isTransitioning = false;
-                System.gc(); // Suggest immediate reclamation of dead PCM arrays
+                crossfadeScheduled = false;
             } catch (Exception e) {
                 e.printStackTrace();
+            } finally {
+                isLoading.set(false);
+                System.gc(); // Clean up dereferenced PCM arrays
             }
-        });
+        }, "RetroMix-TrackLoader").start();
     }
 
     public synchronized void play() {
@@ -148,6 +154,7 @@ public class AudioMixerEngine implements Runnable {
         streamPrimary.stop();
         streamSecondary.stop();
         isTransitioning = false;
+        crossfadeScheduled = false;
     }
 
     public void setManualScratchRate(float rate) {
@@ -173,7 +180,7 @@ public class AudioMixerEngine implements Runnable {
     public boolean isPlaying() { return streamPrimary.isPlaying() || streamSecondary.isPlaying(); }
     public String getCurrentTrackName() { return primaryActive ? streamPrimary.getTrackName() : streamSecondary.getTrackName(); }
     public BufferedImage getCurrentAlbumArt() { return primaryActive ? streamPrimary.getAlbumArt() : streamSecondary.getAlbumArt(); }
-    
+
     public List<File> getPlaylist() {
         synchronized (playlist) {
             return new ArrayList<>(playlist);
@@ -193,18 +200,23 @@ public class AudioMixerEngine implements Runnable {
             AudioTrackStream current = primaryActive ? streamPrimary : streamSecondary;
             AudioTrackStream upcoming = primaryActive ? streamSecondary : streamPrimary;
 
-            // Auto-crossfade trigger
-            if (!isTransitioning && current.isPlaying() && current.isNearEnd(FADE_FRAMES) && playlist.size() > 1 && current.getPlaybackRate() > 0) {
+            // Trigger auto-crossfade exactly once per song end
+            if (!isTransitioning && !crossfadeScheduled && current.isPlaying()
+                    && current.isNearEnd(FADE_FRAMES) && playlist.size() > 1 && current.getPlaybackRate() > 0) {
+                
+                crossfadeScheduled = true;
                 isTransitioning = true;
                 int nextIndex = (playlistIndex + 1) % playlist.size();
                 File nextFile = playlist.get(nextIndex);
-                asyncLoader.submit(() -> {
+
+                new Thread(() -> {
                     try {
-                        upcoming.unload(); // Clear previous data before loading
+                        upcoming.unload();
                         upcoming.load(nextFile);
                         upcoming.play();
-                    } catch (Exception ignored) {}
-                });
+                    } catch (Exception ignored) {
+                    }
+                }, "RetroMix-CrossfadeLoader").start();
             }
 
             if (isTransitioning) {
@@ -214,9 +226,10 @@ public class AudioMixerEngine implements Runnable {
                     if (autoFader >= 1.0f) {
                         autoFader = 1.0f;
                         current.stop();
-                        current.unload(); // Release completed song from memory
+                        current.unload();
                         primaryActive = false;
                         isTransitioning = false;
+                        crossfadeScheduled = false;
                         playlistIndex = (playlistIndex + 1) % playlist.size();
                         System.gc();
                     }
@@ -225,9 +238,10 @@ public class AudioMixerEngine implements Runnable {
                     if (autoFader <= 0.0f) {
                         autoFader = 0.0f;
                         current.stop();
-                        current.unload(); // Release completed song from memory
+                        current.unload();
                         primaryActive = true;
                         isTransitioning = false;
+                        crossfadeScheduled = false;
                         playlistIndex = (playlistIndex + 1) % playlist.size();
                         System.gc();
                     }
@@ -244,6 +258,9 @@ public class AudioMixerEngine implements Runnable {
             if (activeFrames == 0) {
                 Arrays.fill(outputPcmBytes, (byte) 0);
                 outputLine.write(outputPcmBytes, 0, outputPcmBytes.length);
+                try {
+                    Thread.sleep(10); // Throttle idle thread spinning & buffer allocations
+                } catch (InterruptedException ignored) {}
                 continue;
             }
 

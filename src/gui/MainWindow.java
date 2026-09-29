@@ -8,6 +8,8 @@ import java.awt.geom.Path2D;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.List;
 import javax.swing.*;
 import javax.swing.plaf.basic.BasicScrollBarUI;
 import javax.swing.plaf.basic.BasicSliderUI;
@@ -50,26 +52,40 @@ public class MainWindow extends JFrame {
     private JList<String> playlistView;
     private boolean isPlaylistVisible = false;
 
+    // Cached Art to prevent GC churn at 60 FPS
+    private BufferedImage cachedRawArt = null;
+    private BufferedImage cachedCircleArt = null;
+    private int cachedLabelRadius = -1;
+
+    // Static cached colors & strokes to eliminate render-loop object allocations
+    private static final Color COLOR_BG_TOP = new Color(17, 17, 20);
+    private static final Color COLOR_BG_BOTTOM = new Color(11, 11, 13);
+    private static final Color COLOR_GOLD = new Color(255, 180, 50);
+    private static final Color COLOR_TRACK_TEXT = new Color(230, 230, 235);
+    private static final Color COLOR_PLATTER_RIM = new Color(26, 26, 30);
+    private static final Color COLOR_PLATTER_BORDER = new Color(50, 50, 55);
+    private static final Color COLOR_VINYL_BODY = new Color(10, 10, 12);
+    private static final Color COLOR_GROOVES = new Color(42, 42, 50, 55);
+    private static final Color COLOR_LABEL_RED = new Color(210, 60, 35);
+    private static final Color COLOR_LABEL_CREAM = new Color(242, 237, 225);
+    private static final Color COLOR_SPINDLE_SILVER = new Color(200, 200, 205);
+    private static final Color COLOR_SHEEN_START = new Color(255, 255, 255, 26);
+    private static final Color COLOR_SHEEN_END = new Color(255, 255, 255, 0);
+
+    private static final BasicStroke STROKE_1_0 = new BasicStroke(1.0f);
+    private static final BasicStroke STROKE_1_2 = new BasicStroke(1.2f);
+    private static final BasicStroke STROKE_1_5 = new BasicStroke(1.5f);
+    private static final BasicStroke STROKE_1_8 = new BasicStroke(1.8f);
+    private static final BasicStroke STROKE_2_2 = new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
+    private static final BasicStroke STROKE_5_5 = new BasicStroke(5.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
+    private static final BasicStroke STROKE_6_5 = new BasicStroke(6.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND);
+
     public MainWindow(AudioMixerEngine mixer) {
         super("Retro Mix");
         this.mixer = mixer;
 
-        try {
-            java.io.InputStream stream = getClass().getResourceAsStream("/assets/icon.png");
-            if (stream == null) {
-                // Fallback to local file path during IDE/dev execution
-                File fallback = new File("assets/icon.png");
-                if (fallback.exists()) {
-                    stream = new java.io.FileInputStream(fallback);
-                }
-            }
-            if (stream != null) {
-                Image icon = javax.imageio.ImageIO.read(stream);
-                setIconImage(icon);
-            }
-        } catch (Exception e) {
-            System.err.println("Could not load window icon: " + e.getMessage());
-        }
+        // Multi-resolution icons for Windows title bar & taskbar
+        applyAppIcons();
 
         initTypography();
 
@@ -124,6 +140,80 @@ public class MainWindow extends JFrame {
         timer.start();
     }
 
+    private void applyAppIcons() {
+        List<Image> icons = new ArrayList<>();
+        int[] targetSizes = {16, 24, 32, 48, 64, 128};
+
+        BufferedImage baseImg = null;
+        try {
+            java.io.InputStream stream = getClass().getResourceAsStream("/assets/icon.png");
+            if (stream == null) {
+                stream = getClass().getClassLoader().getResourceAsStream("assets/icon.png");
+            }
+            if (stream == null) {
+                File local = new File("assets/icon.png");
+                if (local.exists()) stream = new java.io.FileInputStream(local);
+            }
+            if (stream != null) {
+                baseImg = javax.imageio.ImageIO.read(stream);
+                stream.close();
+            }
+        } catch (Exception ignored) {}
+
+        if (baseImg == null) {
+            baseImg = createProceduralVinylIcon(128);
+        }
+
+        for (int s : targetSizes) {
+            BufferedImage scaled = new BufferedImage(s, s, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g2 = scaled.createGraphics();
+            g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g2.drawImage(baseImg, 0, 0, s, s, null);
+            g2.dispose();
+            icons.add(scaled);
+        }
+
+        setIconImages(icons);
+    }
+
+    private BufferedImage createProceduralVinylIcon(int size) {
+        BufferedImage img = new BufferedImage(size, size, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g2 = img.createGraphics();
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+
+        g2.setColor(new Color(15, 15, 18));
+        g2.fillOval(2, 2, size - 4, size - 4);
+
+        g2.setColor(new Color(65, 65, 75));
+        g2.setStroke(new BasicStroke(size * 0.03f));
+        g2.drawOval(2, 2, size - 4, size - 4);
+
+        g2.setColor(new Color(38, 38, 45));
+        g2.setStroke(new BasicStroke(1.2f));
+        g2.drawOval((int)(size * 0.12), (int)(size * 0.12), (int)(size * 0.76), (int)(size * 0.76));
+        g2.drawOval((int)(size * 0.20), (int)(size * 0.20), (int)(size * 0.60), (int)(size * 0.60));
+        g2.drawOval((int)(size * 0.28), (int)(size * 0.28), (int)(size * 0.44), (int)(size * 0.44));
+
+        int labelRad = (int)(size * 0.38);
+        int labelOffset = (size - labelRad) / 2;
+        g2.setColor(new Color(225, 75, 40));
+        g2.fillOval(labelOffset, labelOffset, labelRad, labelRad);
+
+        int creamRad = (int)(size * 0.24);
+        int creamOffset = (size - creamRad) / 2;
+        g2.setColor(new Color(245, 240, 230));
+        g2.fillOval(creamOffset, creamOffset, creamRad, creamRad);
+
+        int holeRad = Math.max(4, (int)(size * 0.08));
+        int holeOffset = (size - holeRad) / 2;
+        g2.setColor(new Color(15, 15, 18));
+        g2.fillOval(holeOffset, holeOffset, holeRad, holeRad);
+
+        g2.dispose();
+        return img;
+    }
+
     private void setupVinylDirectMouseScratch() {
         MouseAdapter scratchAdapter = new MouseAdapter() {
             @Override
@@ -143,14 +233,12 @@ public class MainWindow extends JFrame {
                 double currentAngle = Math.atan2(e.getY() - vinylCenterY, e.getX() - vinylCenterX);
                 double dTheta = currentAngle - lastMouseAngle;
 
-                // Handle angular boundary wrapping (-PI to +PI)
                 if (dTheta > Math.PI) dTheta -= 2 * Math.PI;
                 if (dTheta < -Math.PI) dTheta += 2 * Math.PI;
 
                 vinylAngle += dTheta;
                 lastMouseAngle = currentAngle;
 
-                // Map hand rotational velocity into playback rate
                 float targetRate = (float) (dTheta * 18.0);
                 targetRate = Math.max(-5.0f, Math.min(5.0f, targetRate));
                 mixer.setManualScratchRate(targetRate);
@@ -192,10 +280,10 @@ public class MainWindow extends JFrame {
         canvas.setBounds(0, 0, w, h);
 
         int barHeight = 55;
-        transportBar.setBounds(0, h - barHeight - 12, w - 80, barHeight);
+        transportBar.setBounds(0, h - barHeight - 12, Math.max(100, w - 80), barHeight);
 
         int volWidth = 55;
-        volumePanel.setBounds(w - volWidth - 14, 50, volWidth, h - 140);
+        volumePanel.setBounds(w - volWidth - 14, 50, volWidth, Math.max(100, h - 140));
 
         playlistOverlay.setBounds(24, 75, 280, Math.max(220, h - 170));
     }
@@ -209,7 +297,7 @@ public class MainWindow extends JFrame {
                 g2.setColor(new Color(16, 16, 20, 240));
                 g2.fill(new RoundRectangle2D.Float(0, 0, getWidth(), getHeight(), 16, 16));
                 g2.setColor(new Color(60, 60, 70));
-                g2.setStroke(new BasicStroke(1.2f));
+                g2.setStroke(STROKE_1_2);
                 g2.draw(new RoundRectangle2D.Float(0, 0, getWidth() - 1, getHeight() - 1, 16, 16));
                 g2.dispose();
             }
@@ -220,7 +308,7 @@ public class MainWindow extends JFrame {
 
         JLabel header = new JLabel("C R A T E   Q U E U E", SwingConstants.LEFT);
         header.setFont(titleFont.deriveFont(Font.BOLD, 12f));
-        header.setForeground(new Color(255, 180, 50));
+        header.setForeground(COLOR_GOLD);
         playlistOverlay.add(header, BorderLayout.NORTH);
 
         playlistModel = new DefaultListModel<>();
@@ -262,7 +350,7 @@ public class MainWindow extends JFrame {
             for (File f : mixer.getPlaylist()) {
                 playlistModel.addElement(f.getName().replaceFirst("[.][^.]+$", ""));
             }
-            if (mixer.getPlaylistIndex() != -1) {
+            if (mixer.getPlaylistIndex() != -1 && mixer.getPlaylistIndex() < playlistModel.size()) {
                 playlistView.setSelectedIndex(mixer.getPlaylistIndex());
             }
         });
@@ -276,7 +364,7 @@ public class MainWindow extends JFrame {
         muteButton = new JButton("VOL");
         muteButton.setFont(uiButtonFont.deriveFont(Font.BOLD, 10f));
         muteButton.setBackground(new Color(32, 32, 35));
-        muteButton.setForeground(new Color(255, 180, 50));
+        muteButton.setForeground(COLOR_GOLD);
         muteButton.setFocusPainted(false);
         muteButton.setBorder(BorderFactory.createRaisedBevelBorder());
         muteButton.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -293,7 +381,7 @@ public class MainWindow extends JFrame {
             } else {
                 mixer.setMasterVolume(preMuteVolume);
                 volumeSlider.setValue((int) (preMuteVolume * 100));
-                muteButton.setForeground(new Color(255, 180, 50));
+                muteButton.setForeground(COLOR_GOLD);
                 isMuted = false;
             }
         });
@@ -309,7 +397,7 @@ public class MainWindow extends JFrame {
             mixer.setMasterVolume(val);
             if (val > 0 && isMuted) {
                 isMuted = false;
-                muteButton.setForeground(new Color(255, 180, 50));
+                muteButton.setForeground(COLOR_GOLD);
             }
         });
 
@@ -406,16 +494,18 @@ public class MainWindow extends JFrame {
             int width = getWidth();
             int height = getHeight();
 
-            g2.setPaint(new GradientPaint(0, 0, new Color(17, 17, 20), 0, height, new Color(11, 11, 13)));
+            // Background fill
+            g2.setPaint(new GradientPaint(0, 0, COLOR_BG_TOP, 0, height, COLOR_BG_BOTTOM));
             g2.fillRect(0, 0, width, height);
 
+            // Title & Track info
             g2.setFont(titleFont);
-            g2.setColor(new Color(255, 180, 50));
+            g2.setColor(COLOR_GOLD);
             g2.drawString("R E T R O   M I X", 36, 38);
 
             String trackName = mixer.getCurrentTrackName();
             g2.setFont(trackFont);
-            g2.setColor(new Color(230, 230, 235));
+            g2.setColor(COLOR_TRACK_TEXT);
             g2.drawString(trackName, 36, 64);
 
             int cx = (width - 60) / 2;
@@ -423,63 +513,76 @@ public class MainWindow extends JFrame {
             int radius = Math.min((width - 240) / 2, (height - 180) / 2);
             radius = Math.max(120, radius);
 
-            // Export coordinates for mouse scratching hit-testing
             vinylCenterX = cx;
             vinylCenterY = cy;
             currentVinylRadius = radius;
 
             // Platter rim
-            g2.setColor(new Color(26, 26, 30));
+            g2.setColor(COLOR_PLATTER_RIM);
             g2.fillOval(cx - radius - 8, cy - radius - 8, (radius + 8) * 2, (radius + 8) * 2);
-            g2.setColor(new Color(50, 50, 55));
-            g2.setStroke(new BasicStroke(1.5f));
+            g2.setColor(COLOR_PLATTER_BORDER);
+            g2.setStroke(STROKE_1_5);
             g2.drawOval(cx - radius - 8, cy - radius - 8, (radius + 8) * 2, (radius + 8) * 2);
 
             // Vinyl body
-            g2.setColor(new Color(10, 10, 12));
+            g2.setColor(COLOR_VINYL_BODY);
             g2.fillOval(cx - radius, cy - radius, radius * 2, radius * 2);
 
             // Micro-grooves
-            g2.setColor(new Color(42, 42, 50, 55));
+            g2.setColor(COLOR_GROOVES);
             for (int r = radius - 8; r > radius / 2; r -= 5) {
                 g2.drawOval(cx - r, cy - r, r * 2, r * 2);
             }
 
             // Center artwork label
+            int labelRadius = (int) (radius * 0.44);
+            BufferedImage currentArt = mixer.getCurrentAlbumArt();
+
+            // Check if cached circular art needs regeneration
+            if (currentArt != cachedRawArt || cachedLabelRadius != labelRadius) {
+                cachedRawArt = currentArt;
+                cachedLabelRadius = labelRadius;
+                if (currentArt != null) {
+                    cachedCircleArt = new BufferedImage(labelRadius * 2, labelRadius * 2, BufferedImage.TYPE_INT_ARGB);
+                    Graphics2D cg = cachedCircleArt.createGraphics();
+                    cg.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    cg.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                    cg.setClip(new Ellipse2D.Float(0, 0, labelRadius * 2, labelRadius * 2));
+                    cg.drawImage(currentArt, 0, 0, labelRadius * 2, labelRadius * 2, null);
+                    cg.dispose();
+                } else {
+                    cachedCircleArt = null;
+                }
+            }
+
             Graphics2D vg = (Graphics2D) g2.create();
             vg.translate(cx, cy);
             vg.rotate(vinylAngle);
 
-            int labelRadius = (int) (radius * 0.44);
-            BufferedImage art = mixer.getCurrentAlbumArt();
-
-            if (art != null) {
-                Shape circleMask = new Ellipse2D.Float(-labelRadius, -labelRadius, labelRadius * 2, labelRadius * 2);
-                vg.setClip(circleMask);
-                vg.drawImage(art, -labelRadius, -labelRadius, labelRadius * 2, labelRadius * 2, null);
-                vg.setClip(null);
+            if (cachedCircleArt != null) {
+                vg.drawImage(cachedCircleArt, -labelRadius, -labelRadius, null);
             } else {
-                vg.setColor(new Color(210, 60, 35));
+                vg.setColor(COLOR_LABEL_RED);
                 vg.fillOval(-labelRadius, -labelRadius, labelRadius * 2, labelRadius * 2);
-                vg.setColor(new Color(242, 237, 225));
+                vg.setColor(COLOR_LABEL_CREAM);
                 vg.fillOval(-labelRadius + 8, -labelRadius + 8, (labelRadius - 8) * 2, (labelRadius - 8) * 2);
 
-                vg.setColor(new Color(20, 20, 22));
+                vg.setColor(COLOR_VINYL_BODY);
                 vg.setFont(titleFont.deriveFont(Font.BOLD, 10f));
                 vg.drawString("33 1/3 RPM", -28, -6);
                 vg.drawString("RETRO MIX", -28, 10);
             }
 
-            vg.setColor(new Color(200, 200, 205));
+            vg.setColor(COLOR_SPINDLE_SILVER);
             vg.fillOval(-8, -8, 16, 16);
-            vg.setColor(new Color(10, 10, 12));
+            vg.setColor(COLOR_VINYL_BODY);
             vg.fillOval(-4, -4, 8, 8);
             vg.dispose();
 
             // Specular lighting reflection across grooves
             GradientPaint sheen = new GradientPaint(
-                    cx - radius, cy - radius, new Color(255, 255, 255, 26),
-                    cx + radius, cy + radius, new Color(255, 255, 255, 0)
+                    cx - radius, cy - radius, COLOR_SHEEN_START,
+                    cx + radius, cy + radius, COLOR_SHEEN_END
             );
             g2.setPaint(sheen);
             g2.fillOval(cx - radius, cy - radius, radius * 2, radius * 2);
@@ -498,7 +601,7 @@ public class MainWindow extends JFrame {
             tg.setPaint(new GradientPaint(baseX - 30, baseY - 30, new Color(55, 55, 60), baseX + 30, baseY + 30, new Color(20, 20, 24)));
             tg.fillOval(baseX - 28, baseY - 28, 56, 56);
             tg.setColor(new Color(80, 80, 90));
-            tg.setStroke(new BasicStroke(1.5f));
+            tg.setStroke(STROKE_1_5);
             tg.drawOval(baseX - 28, baseY - 28, 56, 56);
 
             tg.setColor(new Color(35, 35, 40));
@@ -516,7 +619,7 @@ public class MainWindow extends JFrame {
             tg.setPaint(cwGrad);
             tg.fillRoundRect(-cwW / 2, cwY, cwW, cwH, 6, 6);
 
-            tg.setColor(new Color(255, 180, 50));
+            tg.setColor(COLOR_GOLD);
             tg.fillRect(-cwW / 2, cwY + 14, cwW, 2);
 
             tg.setPaint(new GradientPaint(-14, -14, new Color(210, 210, 220), 14, 14, new Color(70, 70, 75)));
@@ -531,17 +634,17 @@ public class MainWindow extends JFrame {
             armPath.curveTo(-14, wandLen * 0.35, 18, wandLen * 0.70, 2, wandLen);
 
             tg.setColor(new Color(0, 0, 0, 100));
-            tg.setStroke(new BasicStroke(6.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            tg.setStroke(STROKE_6_5);
             tg.translate(2, 3);
             tg.draw(armPath);
             tg.translate(-2, -3);
 
             tg.setColor(new Color(60, 60, 68));
-            tg.setStroke(new BasicStroke(5.5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            tg.setStroke(STROKE_5_5);
             tg.draw(armPath);
 
             tg.setColor(new Color(235, 235, 245));
-            tg.setStroke(new BasicStroke(2.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            tg.setStroke(STROKE_2_2);
             tg.draw(armPath);
 
             tg.translate(2, wandLen);
@@ -553,11 +656,11 @@ public class MainWindow extends JFrame {
             tg.setPaint(new GradientPaint(-7, 0, new Color(45, 45, 50), 7, 0, new Color(18, 18, 22)));
             tg.fillRoundRect(-7, 2, 14, 30, 5, 5);
             tg.setColor(new Color(75, 75, 82));
-            tg.setStroke(new BasicStroke(1.0f));
+            tg.setStroke(STROKE_1_0);
             tg.drawRoundRect(-7, 2, 14, 30, 5, 5);
 
             tg.setColor(new Color(190, 190, 200));
-            tg.setStroke(new BasicStroke(1.8f));
+            tg.setStroke(STROKE_1_8);
             tg.drawLine(7, 10, 16, 8);
 
             tg.setColor(new Color(225, 50, 30));
@@ -575,7 +678,7 @@ public class MainWindow extends JFrame {
             Graphics2D g2 = (Graphics2D) g.create();
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             int trackX = trackRect.x + (trackRect.width / 2) - 3;
-            g2.setColor(new Color(10, 10, 12));
+            g2.setColor(COLOR_VINYL_BODY);
             g2.fillRoundRect(trackX, trackRect.y, 6, trackRect.height, 4, 4);
             g2.dispose();
         }
@@ -594,7 +697,7 @@ public class MainWindow extends JFrame {
             g2.setPaint(gp);
             g2.fillRoundRect(x, y, w, h, 6, 6);
 
-            g2.setColor(new Color(255, 180, 50));
+            g2.setColor(COLOR_GOLD);
             g2.drawLine(x + 2, y + (h / 2), x + w - 3, y + (h / 2));
 
             g2.setColor(new Color(125, 125, 130));
