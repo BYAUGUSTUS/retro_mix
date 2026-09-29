@@ -188,7 +188,9 @@ public class AudioTrackStream implements PCMProcessor {
     }
 
     public boolean isNearEnd(int thresholdFrames) {
-        return isPlaying && (totalFrames > 0) && (totalFrames - currentFramePos <= thresholdFrames);
+        return isPlaying && totalFrames > thresholdFrames *2
+               && currentFramePos > thresholdFrames
+               && (totalFrames - currentFramePos <= thresholdFrames);
     }
 
     @Override
