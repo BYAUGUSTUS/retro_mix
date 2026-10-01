@@ -13,7 +13,7 @@ Built from the ground up in pure Java using low-level Digital Signal Processing 
 - **Interactive Scratching**: Click and drag the record with your mouse to scrub and scratch with authentic needle audio physics.
 - **Auto-Crossfade**: Seamless equal-power transitions between tracks as they end.
 - **Crate Queue**: Slide-out playlist overlay that lets you browse and queue songs without disturbing the vinyl deck.
-- **Folder Sync**: Select a directory to automatically load all `.flac` and `.wav` tracks.
+- **Folder Sync**: Select a directory to automatically load all `.flac` and `.wav` tracks. **No `.mp3` supported.**
 
 ---
 
